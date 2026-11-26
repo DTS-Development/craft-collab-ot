@@ -1,5 +1,6 @@
 //! 수렴·역연산·합성 퍼즈 시험. 외부 크레이트 없이 xorshift로 무작위를 만든다.
 use super::*;
+use crate::core::{Doc, Transform};
 use serde_json::{json, Value};
 
 struct Rng(u64);
@@ -203,4 +204,45 @@ fn diff_composes_back() {
     let a = Delta::new().insert("hello", None);
     let b = Delta::new().insert("heXlo", None);
     assert_eq!(a.diff(&b), Delta::new().retain(2, None).insert("X", None).delete(1));
+}
+
+// ---- 서버 순서 하네스(sim) 연동 ----
+
+impl crate::sim::SimDoc for TextDoc {
+    fn initial() -> Self {
+        TextDoc::default()
+    }
+    fn random_op(&self, rng: &mut crate::sim::Rng) -> Option<TextOp> {
+        let mut r = Rng(rng.next() | 1);
+        let key = ["body", "cell"][r.below(2)].to_string();
+        let doc = self.0.get(&key).cloned().unwrap_or_default();
+        let delta = rand_change(&mut r, &doc);
+        (!delta.is_empty()).then_some(TextOp { key, delta })
+    }
+}
+
+#[test]
+fn text_op_wire_and_transform() {
+    let op = TextOp { key: "k".into(), delta: Delta::new().retain(2, None).insert("é", None) };
+    let s = serde_json::to_string(&op).unwrap();
+    assert!(s.contains(r#""t":"text""#));
+    assert_eq!(serde_json::from_str::<TextOp>(&s).unwrap(), op);
+    // 다른 키는 변환하지 않는다.
+    let other = TextOp { key: "z".into(), delta: Delta::new().insert("x", None) };
+    assert_eq!(op.transform(&other, true), vec![op.clone()]);
+    // 같은 자리 삽입: 앞선 쪽이 먼저 들어간다.
+    let a = TextOp { key: "k".into(), delta: Delta::new().insert("A", None) };
+    let b = TextOp { key: "k".into(), delta: Delta::new().insert("B", None) };
+    let mut d1 = TextDoc::default();
+    d1.apply(&a).unwrap();
+    d1.apply(&b.transform(&a, false)[0]).unwrap();
+    let mut d2 = TextDoc::default();
+    d2.apply(&b).unwrap();
+    d2.apply(&a.transform(&b, true)[0]).unwrap();
+    assert_eq!(d1.canon(), d2.canon());
+}
+
+#[test]
+fn text_doc_converges_under_the_server_order_harness() {
+    crate::sim::run_fuzz::<TextDoc>(0..200, 3, 40).unwrap();
 }

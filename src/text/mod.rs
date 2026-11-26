@@ -13,7 +13,9 @@
 
 mod delta;
 mod diff;
+mod op;
 #[cfg(test)]
 mod fuzz;
 
 pub use delta::{Attrs, Delta, Insert, Op, EMBED_LEN};
+pub use op::{TextDoc, TextOp};
