@@ -15,6 +15,7 @@ pub enum Insert {
     Embed(Value),
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl Insert {
     pub fn len(&self) -> usize {
         match self {
@@ -31,6 +32,7 @@ pub enum Op {
     Delete(usize),
 }
 
+#[allow(clippy::len_without_is_empty)]
 impl Op {
     pub fn len(&self) -> usize {
         match self {
