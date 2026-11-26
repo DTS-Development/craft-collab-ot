@@ -12,6 +12,7 @@
 //! 글자 안쪽을 자르지 않는다. 외부(원격)에서 온 delta는 [`Delta::check_on`]으로 먼저 검사한다.
 
 mod delta;
+mod diff;
 #[cfg(test)]
 mod fuzz;
 

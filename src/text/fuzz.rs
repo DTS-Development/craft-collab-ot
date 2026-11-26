@@ -187,3 +187,20 @@ fn json_round_trip() {
     assert!(serde_json::from_str::<Delta>(r#"{"ops":[{"retain":0}]}"#).is_err());
     assert!(serde_json::from_str::<Delta>(r#"{"ops":[{"insert":"a","retain":1}]}"#).is_err());
 }
+
+#[test]
+fn diff_composes_back() {
+    let mut r = Rng(777);
+    for _ in 0..20000 {
+        let a = rand_doc(&mut r);
+        let b = rand_doc(&mut r);
+        let d = a.diff(&b);
+        assert_eq!(a.compose(&d), b, "a={a:?}\nb={b:?}\nd={d:?}");
+        // 같은 문서끼리는 변경이 없다.
+        assert!(a.diff(&a).is_empty());
+    }
+    // 가운데 한 글자 바뀜은 그 글자만 건드린다.
+    let a = Delta::new().insert("hello", None);
+    let b = Delta::new().insert("heXlo", None);
+    assert_eq!(a.diff(&b), Delta::new().retain(2, None).insert("X", None).delete(1));
+}

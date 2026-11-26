@@ -1,0 +1,164 @@
+//! reg·seq 변환 시험: TP1 전수(작은 목록) + 서버 순서 수렴 퍼즈 + 역 op.
+use crate::core::{Doc, Invert};
+use crate::reg::{RegDoc, RegOp};
+use crate::seq::{SeqDoc, SeqOp};
+use crate::sim::{run_fuzz, Rng, SimDoc};
+use serde_json::{json, Value};
+
+fn apply_all<D: Doc>(d: &D, ops: &[D::Op]) -> Result<D, String> {
+    let mut d = d.clone();
+    for o in ops {
+        d.apply(o).map_err(|e| e.to_string())?;
+    }
+    Ok(d)
+}
+
+/// a가 서버 순서에서 앞, b가 뒤. 양쪽 경로가 같은 정규형이 되어야 한다.
+fn tp1<D: Doc>(s: &D, a: &D::Op, b: &D::Op) -> Result<(), String> {
+    use crate::core::Transform;
+    let b2 = b.transform(a, false);
+    let a2 = a.transform(b, true);
+    let p1 = apply_all(&apply_all(s, std::slice::from_ref(a))?, &b2)?;
+    let p2 = apply_all(&apply_all(s, std::slice::from_ref(b))?, &a2)?;
+    if p1.canon() == p2.canon() {
+        Ok(())
+    } else {
+        Err(format!("TP1 실패\n  s={}\n  a={a:?}\n  b={b:?}\n  a->b'={}\n  b->a'={}", s.canon(), p1.canon(), p2.canon()))
+    }
+}
+
+fn seq_doc(n: usize) -> SeqDoc {
+    SeqDoc((0..n as u64).map(|i| (i + 1, json!(i))).collect())
+}
+
+/// 이 문서에서 만들 수 있는 모든 op(새 원소 id는 `fresh`)
+fn all_seq_ops(d: &SeqDoc, fresh: u64) -> Vec<SeqOp> {
+    let n = d.0.len();
+    let mut v = vec![];
+    for i in 0..=n {
+        v.push(SeqOp::Ins { i, id: fresh, v: json!("x") });
+    }
+    for i in 0..n {
+        v.push(SeqOp::Del { i, id: d.0[i].0 });
+        for to in 0..n {
+            v.push(SeqOp::Mov { id: d.0[i].0, from: i, to });
+        }
+    }
+    v
+}
+
+#[test]
+fn seq_tp1_exhaustive() {
+    for n in 0..=5 {
+        let s = seq_doc(n);
+        // 서로 다른 클라이언트가 만든 새 원소는 id가 다르다
+        let (xs, ys) = (all_seq_ops(&s, 100), all_seq_ops(&s, 200));
+        for a in &xs {
+            for b in &ys {
+                tp1(&s, a, b).unwrap_or_else(|e| panic!("{e}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn reg_tp1_exhaustive() {
+    let mut s = RegDoc::default();
+    s.apply(&RegOp::set("a", json!(1))).unwrap();
+    let ops: Vec<RegOp> = ["a", "b"].iter().flat_map(|k| vec![RegOp::set(*k, json!(7)), RegOp::set(*k, json!(8)), RegOp::del(*k)]).collect();
+    for a in &ops {
+        for b in &ops {
+            tp1(&s, a, b).unwrap_or_else(|e| panic!("{e}"));
+        }
+    }
+}
+
+impl SimDoc for SeqDoc {
+    fn initial() -> Self {
+        seq_doc(3)
+    }
+    fn random_op(&self, rng: &mut Rng) -> Option<SeqOp> {
+        let fresh = 1_000 + rng.next() % 1_000_000_000_000;
+        let n = self.0.len();
+        Some(match rng.below(3) {
+            0 => SeqOp::Ins { i: rng.below(n + 1), id: fresh, v: json!(fresh) },
+            1 if n > 0 => {
+                let i = rng.below(n);
+                SeqOp::Del { i, id: self.0[i].0 }
+            }
+            _ if n > 0 => {
+                let i = rng.below(n);
+                SeqOp::Mov { id: self.0[i].0, from: i, to: rng.below(n) }
+            }
+            _ => return None,
+        })
+    }
+}
+
+impl SimDoc for RegDoc {
+    fn initial() -> Self {
+        RegDoc::default()
+    }
+    fn random_op(&self, rng: &mut Rng) -> Option<RegOp> {
+        let key = format!("k{}", rng.below(4));
+        Some(if rng.chance(1, 4) { RegOp::del(key) } else { RegOp::set(key, json!(rng.below(1000))) })
+    }
+}
+
+#[test]
+fn seq_fuzz_converges() {
+    for clients in 2..=5 {
+        if let Err(f) = run_fuzz::<SeqDoc>(0..200, clients, 40) {
+            panic!("{f:?}");
+        }
+    }
+}
+
+#[test]
+fn reg_fuzz_converges() {
+    for clients in 2..=5 {
+        if let Err(f) = run_fuzz::<RegDoc>(0..200, clients, 40) {
+            panic!("{f:?}");
+        }
+    }
+}
+
+#[test]
+fn seq_invert_roundtrip() {
+    let mut rng = Rng::new(7);
+    for _ in 0..500 {
+        let mut d = seq_doc(rng.below(5));
+        for _ in 0..6 {
+            let Some(op) = d.random_op(&mut rng) else { continue };
+            let before = d.clone();
+            d.apply(&op).unwrap();
+            let inv = op.invert(&before);
+            let back = apply_all(&d, &inv).unwrap();
+            assert_eq!(back.canon(), before.canon(), "{op:?}");
+        }
+    }
+}
+
+#[test]
+fn reg_invert_roundtrip() {
+    let mut rng = Rng::new(9);
+    let mut d = RegDoc::default();
+    for _ in 0..300 {
+        let op = d.random_op(&mut rng).unwrap();
+        let before = d.clone();
+        d.apply(&op).unwrap();
+        let back = apply_all(&d, &op.invert(&before)).unwrap();
+        assert_eq!(back.canon(), before.canon());
+    }
+}
+
+#[test]
+fn wire_shapes() {
+    let v: Value = serde_json::to_value(RegOp::set("k", json!(1))).unwrap();
+    assert_eq!(v, json!({"t": "reg", "key": "k", "v": 1}));
+    assert_eq!(serde_json::to_value(RegOp::del("k")).unwrap(), json!({"t": "reg", "key": "k"}));
+    let m = SeqOp::Mov { id: 3, from: 1, to: 2 };
+    assert_eq!(serde_json::to_value(&m).unwrap(), json!({"t": "mov", "id": 3, "from": 1, "to": 2}));
+    let back: SeqOp = serde_json::from_value(json!({"t": "ins", "i": 0, "id": 9, "v": "a"})).unwrap();
+    assert_eq!(back, SeqOp::Ins { i: 0, id: 9, v: json!("a") });
+}
