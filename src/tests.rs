@@ -162,3 +162,30 @@ fn wire_shapes() {
     let back: SeqOp = serde_json::from_value(json!({"t": "ins", "i": 0, "id": 9, "v": "a"})).unwrap();
     assert_eq!(back, SeqOp::Ins { i: 0, id: 9, v: json!("a") });
 }
+
+/// 순차 묶음끼리도 같은 상태로 수렴한다(transform_seq 격자).
+#[test]
+fn seq_batches_converge() {
+    use crate::core::transform_seq;
+    let mut rng = Rng::new(3);
+    for it in 0..3000 {
+        let s = seq_doc(rng.below(5));
+        let mk = |rng: &mut Rng| {
+            let mut d = s.clone();
+            let mut v = vec![];
+            for _ in 0..1 + rng.below(3) {
+                if let Some(o) = d.random_op(rng) {
+                    d.apply(&o).unwrap();
+                    v.push(o);
+                }
+            }
+            v
+        };
+        let a = mk(&mut rng);
+        let b = mk(&mut rng);
+        let (a2, b2) = transform_seq(&a, &b, true);
+        let p1 = apply_all(&apply_all(&s, &a).unwrap(), &b2).unwrap();
+        let p2 = apply_all(&apply_all(&s, &b).unwrap(), &a2).unwrap();
+        assert_eq!(p1.canon(), p2.canon(), "iter {it}\n s={}\n a={a:?}\n b={b:?}", s.canon());
+    }
+}

@@ -56,6 +56,8 @@ struct Client<D: Doc> {
     confirmed: D,
     local: D,
     inflight: Vec<D::Op>,
+    /// 묶음이 서버에 나가 있고 아직 확정되지 않았다(변환으로 inflight가 비어도 true)
+    awaiting: bool,
     buffer: Vec<D::Op>,
     /// 확정된 정규형 로그(인덱스 = rev - 1)
     log: Vec<Vec<D::Op>>,
@@ -65,15 +67,16 @@ struct Client<D: Doc> {
 
 impl<D: Doc> Client<D> {
     fn new(id: usize, init: &D) -> Self {
-        Client { id, rev: 0, confirmed: init.clone(), local: init.clone(), inflight: vec![], buffer: vec![], log: vec![], seq: 0, last_sent: None }
+        Client { id, rev: 0, confirmed: init.clone(), local: init.clone(), inflight: vec![], awaiting: false, buffer: vec![], log: vec![], seq: 0, last_sent: None }
     }
 
     /// 나가 있는 묶음이 없고 쌓인 편집이 있으면 한 묶음으로 보낸다.
     fn try_send(&mut self) -> Option<Entry<D::Op>> {
-        if !self.inflight.is_empty() || self.buffer.is_empty() {
+        if self.awaiting || self.buffer.is_empty() {
             return None;
         }
         self.inflight = std::mem::take(&mut self.buffer);
+        self.awaiting = true;
         self.seq += 1;
         let e = Entry { rev: 0, client: self.id, seq: self.seq, base: self.rev, ops: self.inflight.clone() };
         self.last_sent = Some(e.clone());
@@ -95,6 +98,7 @@ impl<D: Doc> Client<D> {
         if e.client == self.id {
             // 내 묶음이 확정됐다. local은 이미 반영돼 있다.
             self.inflight.clear();
+            self.awaiting = false;
             self.last_sent = None;
         } else {
             // 남의 확정 op를 내 미확정 묶음 뒤로 옮겨 local에 적용한다(확정 op가 앞선다)
@@ -108,6 +112,14 @@ impl<D: Doc> Client<D> {
         }
         self.rev = e.rev;
         self.log.push(canon);
+        // 불변식: local = confirmed에 미확정 묶음(inflight, buffer)을 차례로 적용한 것
+        let mut t = self.confirmed.clone();
+        for op in self.inflight.iter().chain(self.buffer.iter()) {
+            t.apply(op).map_err(|x| format!("client {} 미확정 op가 confirmed 위에서 적용되지 않음 (rev {}, {:?}): {x}", self.id, e.rev, e))?;
+        }
+        if t.canon() != self.local.canon() {
+            return Err(format!("client {} 불변식 깨짐 rev {} entry {:?}\n inflight {:?}\n buffer {:?}\n confirmed {}\n local {}\n replay {}", self.id, e.rev, e, self.inflight, self.buffer, self.confirmed.canon(), self.local.canon(), t.canon()));
+        }
         Ok(())
     }
 }
@@ -201,7 +213,7 @@ pub fn run_once<D: SimDoc>(seed: u64, clients: usize, steps: usize) -> Result<()
         }
     }
     for c in &cs {
-        if !c.inflight.is_empty() || !c.buffer.is_empty() {
+        if c.awaiting || !c.buffer.is_empty() {
             return Err(format!("client {} 미확정 op가 남음", c.id));
         }
         if c.rev != srv_rev {
