@@ -7,7 +7,8 @@
 //! - 채널은 클라이언트별 FIFO이고, 어느 채널을 먼저 처리할지·중복 전송 여부를 seed 난수로 정한다.
 //!
 //! 앱은 [`SimDoc`]만 구현하면 같은 하네스로 수렴을 시험할 수 있다.
-use crate::core::{transform_seq, Doc};
+use crate::client::{Entry as ClientEntry, SyncClient};
+use crate::core::Doc;
 use std::collections::VecDeque;
 
 /// seed 하나로 재현되는 작은 난수기(xorshift64*).
@@ -52,73 +53,42 @@ pub struct Entry<Op> {
 
 struct Client<D: Doc> {
     id: usize,
-    rev: u64,
     confirmed: D,
     local: D,
-    inflight: Vec<D::Op>,
-    /// 묶음이 서버에 나가 있고 아직 확정되지 않았다(변환으로 inflight가 비어도 true)
-    awaiting: bool,
-    buffer: Vec<D::Op>,
-    /// 확정된 정규형 로그(인덱스 = rev - 1)
-    log: Vec<Vec<D::Op>>,
-    seq: u64,
-    last_sent: Option<Entry<D::Op>>,
+    sc: SyncClient<D::Op>,
 }
 
 impl<D: Doc> Client<D> {
     fn new(id: usize, init: &D) -> Self {
-        Client { id, rev: 0, confirmed: init.clone(), local: init.clone(), inflight: vec![], awaiting: false, buffer: vec![], log: vec![], seq: 0, last_sent: None }
+        Client { id, confirmed: init.clone(), local: init.clone(), sc: SyncClient::new(0, 0) }
     }
 
-    /// 나가 있는 묶음이 없고 쌓인 편집이 있으면 한 묶음으로 보낸다.
     fn try_send(&mut self) -> Option<Entry<D::Op>> {
-        if self.awaiting || self.buffer.is_empty() {
-            return None;
-        }
-        self.inflight = std::mem::take(&mut self.buffer);
-        self.awaiting = true;
-        self.seq += 1;
-        let e = Entry { rev: 0, client: self.id, seq: self.seq, base: self.rev, ops: self.inflight.clone() };
-        self.last_sent = Some(e.clone());
-        Some(e)
+        let b = self.sc.next_send()?;
+        Some(Entry { rev: 0, client: self.id, seq: b.seq, base: b.base, ops: b.ops })
+    }
+
+    fn last_sent(&self) -> Option<Entry<D::Op>> {
+        let b = self.sc.resend()?;
+        Some(Entry { rev: 0, client: self.id, seq: b.seq, base: b.base, ops: b.ops })
     }
 
     fn receive(&mut self, e: &Entry<D::Op>) -> Result<(), String> {
-        if e.rev != self.rev + 1 {
-            return Err(format!("client {} rev 건너뜀: 받은 {} 가진 {}", self.id, e.rev, self.rev));
-        }
-        // 보낸 쪽이 아직 몰랐던 확정 항목(base, rev)에 대해 같은 순서로 변환해 정규형을 만든다
-        let mut canon = e.ops.clone();
-        for r in (e.base as usize)..(e.rev as usize - 1) {
-            canon = transform_seq(&canon, &self.log[r], false).0;
-        }
-        for op in &canon {
+        let ce = ClientEntry { rev: e.rev, base: e.base, own: e.client == self.id, ops: e.ops.clone() };
+        let r = self.sc.receive(&ce).map_err(|x| format!("client {} {x}", self.id))?;
+        for op in &r.confirmed {
             self.confirmed.apply(op).map_err(|x| format!("client {} confirmed 적용 실패 rev {}: {x}", self.id, e.rev))?;
         }
-        if e.client == self.id {
-            // 내 묶음이 확정됐다. local은 이미 반영돼 있다.
-            self.inflight.clear();
-            self.awaiting = false;
-            self.last_sent = None;
-        } else {
-            // 남의 확정 op를 내 미확정 묶음 뒤로 옮겨 local에 적용한다(확정 op가 앞선다)
-            let (c1, inflight) = transform_seq(&canon, &self.inflight, true);
-            let (c2, buffer) = transform_seq(&c1, &self.buffer, true);
-            for op in &c2 {
-                self.local.apply(op).map_err(|x| format!("client {} local 적용 실패 rev {}: {x}", self.id, e.rev))?;
-            }
-            self.inflight = inflight;
-            self.buffer = buffer;
+        for op in &r.local {
+            self.local.apply(op).map_err(|x| format!("client {} local 적용 실패 rev {}: {x}", self.id, e.rev))?;
         }
-        self.rev = e.rev;
-        self.log.push(canon);
         // 불변식: local = confirmed에 미확정 묶음(inflight, buffer)을 차례로 적용한 것
         let mut t = self.confirmed.clone();
-        for op in self.inflight.iter().chain(self.buffer.iter()) {
+        for op in self.sc.pending().iter() {
             t.apply(op).map_err(|x| format!("client {} 미확정 op가 confirmed 위에서 적용되지 않음 (rev {}, {:?}): {x}", self.id, e.rev, e))?;
         }
         if t.canon() != self.local.canon() {
-            return Err(format!("client {} 불변식 깨짐 rev {} entry {:?}\n inflight {:?}\n buffer {:?}\n confirmed {}\n local {}\n replay {}", self.id, e.rev, e, self.inflight, self.buffer, self.confirmed.canon(), self.local.canon(), t.canon()));
+            return Err(format!("client {} 불변식 깨짐 rev {} entry {:?}\n pending {:?}\n confirmed {}\n local {}\n replay {}", self.id, e.rev, e, self.sc.pending(), self.confirmed.canon(), self.local.canon(), t.canon()));
         }
         Ok(())
     }
@@ -155,7 +125,7 @@ pub fn run_once<D: SimDoc>(seed: u64, clients: usize, steps: usize) -> Result<()
         for c in 0..clients {
             if budget > 0 {
                 evs.push((0, c));
-                if cs[c].last_sent.is_some() {
+                if cs[c].sc.resend().is_some() {
                     evs.push((3, c));
                 }
             }
@@ -175,7 +145,7 @@ pub fn run_once<D: SimDoc>(seed: u64, clients: usize, steps: usize) -> Result<()
                 budget -= 1;
                 if let Some(op) = cs[c].local.random_op(&mut rng) {
                     cs[c].local.apply(&op).map_err(|x| format!("client {c} 만든 op를 못 적용: {x}"))?;
-                    cs[c].buffer.push(op);
+                    cs[c].sc.local_edit([op]);
                 }
             }
             1 => {
@@ -197,7 +167,7 @@ pub fn run_once<D: SimDoc>(seed: u64, clients: usize, steps: usize) -> Result<()
                 cs[c].receive(&m)?;
             }
             _ => {
-                if let Some(e) = cs[c].last_sent.clone() {
+                if let Some(e) = cs[c].last_sent() {
                     up[c].push_back(e); // 같은 seq를 다시 보낸다
                 }
             }
@@ -213,11 +183,11 @@ pub fn run_once<D: SimDoc>(seed: u64, clients: usize, steps: usize) -> Result<()
         }
     }
     for c in &cs {
-        if c.awaiting || !c.buffer.is_empty() {
+        if c.sc.has_pending() {
             return Err(format!("client {} 미확정 op가 남음", c.id));
         }
-        if c.rev != srv_rev {
-            return Err(format!("client {} rev {} != 서버 {}", c.id, c.rev, srv_rev));
+        if c.sc.rev() != srv_rev {
+            return Err(format!("client {} rev {} != 서버 {}", c.id, c.sc.rev(), srv_rev));
         }
         if c.confirmed.canon() != c.local.canon() {
             return Err(format!("client {} confirmed != local\n  {}\n  {}", c.id, c.confirmed.canon(), c.local.canon()));
