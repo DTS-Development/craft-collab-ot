@@ -244,5 +244,8 @@ fn text_op_wire_and_transform() {
 
 #[test]
 fn text_doc_converges_under_the_server_order_harness() {
-    crate::sim::run_fuzz::<TextDoc>(0..200, 3, 40).unwrap();
+    // 서식 속성·embed·한글·이모지는 rand_* 생성기가 섞는다.
+    for clients in 2..=5 {
+        crate::sim::run_fuzz::<TextDoc>(0..200, clients, 40).unwrap();
+    }
 }
