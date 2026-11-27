@@ -38,10 +38,14 @@ fn atoms(d: &Delta) -> Vec<Atom> {
     for op in d.ops() {
         if let Op::Insert { ins, attrs } = op {
             match ins {
-                Insert::Text(s) => {
-                    v.extend(s.chars().map(|c| Atom { kind: Kind::Ch(c), attrs: attrs.clone() }))
-                }
-                Insert::Embed(e) => v.push(Atom { kind: Kind::Embed(e.clone()), attrs: attrs.clone() }),
+                Insert::Text(s) => v.extend(s.chars().map(|c| Atom {
+                    kind: Kind::Ch(c),
+                    attrs: attrs.clone(),
+                })),
+                Insert::Embed(e) => v.push(Atom {
+                    kind: Kind::Embed(e.clone()),
+                    attrs: attrs.clone(),
+                }),
             }
         }
     }
@@ -52,7 +56,10 @@ fn atoms(d: &Delta) -> Vec<Atom> {
 fn attr_change(from: &Option<Attrs>, to: &Option<Attrs>) -> Option<Attrs> {
     let mut out = Attrs::new();
     let empty = Attrs::new();
-    let (f, t) = (from.as_ref().unwrap_or(&empty), to.as_ref().unwrap_or(&empty));
+    let (f, t) = (
+        from.as_ref().unwrap_or(&empty),
+        to.as_ref().unwrap_or(&empty),
+    );
     for (k, v) in t {
         if f.get(k) != Some(v) {
             out.insert(k.clone(), v.clone());
@@ -130,14 +137,20 @@ impl Delta {
         let mut out = Delta::new();
         for s in align(&a, &b) {
             match s {
-                Step::Same(i, j) => out.push(Op::Retain { n: a[i].len(), attrs: attr_change(&a[i].attrs, &b[j].attrs) }),
+                Step::Same(i, j) => out.push(Op::Retain {
+                    n: a[i].len(),
+                    attrs: attr_change(&a[i].attrs, &b[j].attrs),
+                }),
                 Step::Del(i) => out.push(Op::Delete(a[i].len())),
                 Step::Ins(j) => {
                     let ins = match &b[j].kind {
                         Kind::Ch(c) => Insert::Text(c.to_string()),
                         Kind::Embed(e) => Insert::Embed(e.clone()),
                     };
-                    out.push(Op::Insert { ins, attrs: b[j].attrs.clone() });
+                    out.push(Op::Insert {
+                        ins,
+                        attrs: b[j].attrs.clone(),
+                    });
                 }
             }
         }

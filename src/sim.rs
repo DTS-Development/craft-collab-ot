@@ -60,32 +60,66 @@ struct Client<D: Doc> {
 
 impl<D: Doc> Client<D> {
     fn new(id: usize, init: &D) -> Self {
-        Client { id, confirmed: init.clone(), local: init.clone(), sc: SyncClient::new(0, 0) }
+        Client {
+            id,
+            confirmed: init.clone(),
+            local: init.clone(),
+            sc: SyncClient::new(0, 0),
+        }
     }
 
     fn try_send(&mut self) -> Option<Entry<D::Op>> {
         let b = self.sc.next_send()?;
-        Some(Entry { rev: 0, client: self.id, seq: b.seq, base: b.base, ops: b.ops })
+        Some(Entry {
+            rev: 0,
+            client: self.id,
+            seq: b.seq,
+            base: b.base,
+            ops: b.ops,
+        })
     }
 
     fn last_sent(&self) -> Option<Entry<D::Op>> {
         let b = self.sc.resend()?;
-        Some(Entry { rev: 0, client: self.id, seq: b.seq, base: b.base, ops: b.ops })
+        Some(Entry {
+            rev: 0,
+            client: self.id,
+            seq: b.seq,
+            base: b.base,
+            ops: b.ops,
+        })
     }
 
     fn receive(&mut self, e: &Entry<D::Op>) -> Result<(), String> {
-        let ce = ClientEntry { rev: e.rev, base: e.base, own: e.client == self.id, ops: e.ops.clone() };
-        let r = self.sc.receive(&ce).map_err(|x| format!("client {} {x}", self.id))?;
+        let ce = ClientEntry {
+            rev: e.rev,
+            base: e.base,
+            own: e.client == self.id,
+            ops: e.ops.clone(),
+        };
+        let r = self
+            .sc
+            .receive(&ce)
+            .map_err(|x| format!("client {} {x}", self.id))?;
         for op in &r.confirmed {
-            self.confirmed.apply(op).map_err(|x| format!("client {} confirmed 적용 실패 rev {}: {x}", self.id, e.rev))?;
+            self.confirmed.apply(op).map_err(|x| {
+                format!("client {} confirmed 적용 실패 rev {}: {x}", self.id, e.rev)
+            })?;
         }
         for op in &r.local {
-            self.local.apply(op).map_err(|x| format!("client {} local 적용 실패 rev {}: {x}", self.id, e.rev))?;
+            self.local
+                .apply(op)
+                .map_err(|x| format!("client {} local 적용 실패 rev {}: {x}", self.id, e.rev))?;
         }
         // 불변식: local = confirmed에 미확정 묶음(inflight, buffer)을 차례로 적용한 것
         let mut t = self.confirmed.clone();
         for op in self.sc.pending().iter() {
-            t.apply(op).map_err(|x| format!("client {} 미확정 op가 confirmed 위에서 적용되지 않음 (rev {}, {:?}): {x}", self.id, e.rev, e))?;
+            t.apply(op).map_err(|x| {
+                format!(
+                    "client {} 미확정 op가 confirmed 위에서 적용되지 않음 (rev {}, {:?}): {x}",
+                    self.id, e.rev, e
+                )
+            })?;
         }
         if t.canon() != self.local.canon() {
             return Err(format!("client {} 불변식 깨짐 rev {} entry {:?}\n pending {:?}\n confirmed {}\n local {}\n replay {}", self.id, e.rev, e, self.sc.pending(), self.confirmed.canon(), self.local.canon(), t.canon()));
@@ -144,7 +178,10 @@ pub fn run_once<D: SimDoc>(seed: u64, clients: usize, steps: usize) -> Result<()
             0 => {
                 budget -= 1;
                 if let Some(op) = cs[c].local.random_op(&mut rng) {
-                    cs[c].local.apply(&op).map_err(|x| format!("client {c} 만든 op를 못 적용: {x}"))?;
+                    cs[c]
+                        .local
+                        .apply(&op)
+                        .map_err(|x| format!("client {c} 만든 op를 못 적용: {x}"))?;
                     cs[c].sc.local_edit([op]);
                 }
             }
@@ -187,23 +224,42 @@ pub fn run_once<D: SimDoc>(seed: u64, clients: usize, steps: usize) -> Result<()
             return Err(format!("client {} 미확정 op가 남음", c.id));
         }
         if c.sc.rev() != srv_rev {
-            return Err(format!("client {} rev {} != 서버 {}", c.id, c.sc.rev(), srv_rev));
+            return Err(format!(
+                "client {} rev {} != 서버 {}",
+                c.id,
+                c.sc.rev(),
+                srv_rev
+            ));
         }
         if c.confirmed.canon() != c.local.canon() {
-            return Err(format!("client {} confirmed != local\n  {}\n  {}", c.id, c.confirmed.canon(), c.local.canon()));
+            return Err(format!(
+                "client {} confirmed != local\n  {}\n  {}",
+                c.id,
+                c.confirmed.canon(),
+                c.local.canon()
+            ));
         }
     }
     let first = cs[0].confirmed.canon();
     for c in &cs[1..] {
         if c.confirmed.canon() != first {
-            return Err(format!("수렴 실패 client 0 vs {}\n  {}\n  {}", c.id, first, c.confirmed.canon()));
+            return Err(format!(
+                "수렴 실패 client 0 vs {}\n  {}\n  {}",
+                c.id,
+                first,
+                c.confirmed.canon()
+            ));
         }
     }
     Ok(())
 }
 
 /// seed 범위를 돌린다. 실패하면 편집 수를 줄여 가며 가장 작은 재현을 찾아 돌려준다.
-pub fn run_fuzz<D: SimDoc>(seeds: std::ops::Range<u64>, clients: usize, steps: usize) -> Result<(), FuzzFail> {
+pub fn run_fuzz<D: SimDoc>(
+    seeds: std::ops::Range<u64>,
+    clients: usize,
+    steps: usize,
+) -> Result<(), FuzzFail> {
     for seed in seeds {
         if let Err(first) = run_once::<D>(seed, clients, steps) {
             let (mut best, mut message) = (steps, first);
@@ -214,7 +270,12 @@ pub fn run_fuzz<D: SimDoc>(seeds: std::ops::Range<u64>, clients: usize, steps: u
                     break;
                 }
             }
-            return Err(FuzzFail { seed, clients, steps: best, message });
+            return Err(FuzzFail {
+                seed,
+                clients,
+                steps: best,
+                message,
+            });
         }
     }
     Ok(())

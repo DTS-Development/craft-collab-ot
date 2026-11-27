@@ -14,6 +14,6 @@ pub mod core;
 pub mod reg;
 pub mod seq;
 pub mod sim;
-pub mod text;
 #[cfg(test)]
 mod tests;
+pub mod text;

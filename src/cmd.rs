@@ -48,10 +48,17 @@ enum CmdTag {
 
 impl<R: CmdRules> CmdOp<R> {
     pub fn new(name: impl Into<String>, args: Value) -> Self {
-        Self::from_body(CmdBody { name: name.into(), args })
+        Self::from_body(CmdBody {
+            name: name.into(),
+            args,
+        })
     }
     pub fn from_body(body: CmdBody) -> Self {
-        CmdOp { tag: CmdTag::Cmd, body, _rules: PhantomData }
+        CmdOp {
+            tag: CmdTag::Cmd,
+            body,
+            _rules: PhantomData,
+        }
     }
 }
 
@@ -73,7 +80,10 @@ impl<R: CmdRules> PartialEq for CmdOp<R> {
 
 impl<R: CmdRules> Transform for CmdOp<R> {
     fn transform(&self, other: &Self, a_first: bool) -> Vec<Self> {
-        R::transform(&self.body, &other.body, a_first).into_iter().map(Self::from_body).collect()
+        R::transform(&self.body, &other.body, a_first)
+            .into_iter()
+            .map(Self::from_body)
+            .collect()
     }
 }
 
@@ -90,26 +100,53 @@ mod tests {
     impl CmdRules for Grid {
         fn transform(a: &CmdBody, b: &CmdBody, a_first: bool) -> Vec<CmdBody> {
             let n = |v: &Value, k: &str| v[k].as_u64().unwrap();
-            let mk = |name: &str, args: Value| vec![CmdBody { name: name.into(), args }];
+            let mk = |name: &str, args: Value| {
+                vec![CmdBody {
+                    name: name.into(),
+                    args,
+                }]
+            };
             match (a.name.as_str(), b.name.as_str()) {
                 ("ins_row", "ins_row") => {
                     let (i, j) = (n(&a.args, "i"), n(&b.args, "i"));
-                    mk("ins_row", json!({"i": if j < i || (j == i && !a_first) { i + 1 } else { i }, "id": a.args["id"]}))
+                    mk(
+                        "ins_row",
+                        json!({"i": if j < i || (j == i && !a_first) { i + 1 } else { i }, "id": a.args["id"]}),
+                    )
                 }
                 ("ins_row", "del_row") => {
                     let (i, j) = (n(&a.args, "i"), n(&b.args, "i"));
-                    mk("ins_row", json!({"i": if j < i { i - 1 } else { i }, "id": a.args["id"]}))
+                    mk(
+                        "ins_row",
+                        json!({"i": if j < i { i - 1 } else { i }, "id": a.args["id"]}),
+                    )
                 }
                 ("del_row", "ins_row") => {
                     let (i, j) = (n(&a.args, "i"), n(&b.args, "i"));
-                    mk("del_row", json!({"i": if j <= i { i + 1 } else { i }, "id": a.args["id"]}))
+                    mk(
+                        "del_row",
+                        json!({"i": if j <= i { i + 1 } else { i }, "id": a.args["id"]}),
+                    )
                 }
                 ("del_row", "del_row") => {
                     let (i, j) = (n(&a.args, "i"), n(&b.args, "i"));
-                    if i == j { vec![] } else { mk("del_row", json!({"i": if j < i { i - 1 } else { i }, "id": a.args["id"]})) }
+                    if i == j {
+                        vec![]
+                    } else {
+                        mk(
+                            "del_row",
+                            json!({"i": if j < i { i - 1 } else { i }, "id": a.args["id"]}),
+                        )
+                    }
                 }
                 // 셀 쓰기: 같은 셀은 늦은 쪽이 이기고, 행이 지워졌으면 버린다
-                ("set_cell", "set_cell") if a.args["row"] == b.args["row"] && a.args["col"] == b.args["col"] && a_first => vec![],
+                ("set_cell", "set_cell")
+                    if a.args["row"] == b.args["row"]
+                        && a.args["col"] == b.args["col"]
+                        && a_first =>
+                {
+                    vec![]
+                }
                 ("set_cell", "del_row") if a.args["row"] == b.args["id"] => vec![],
                 _ => vec![a.clone()],
             }
@@ -148,7 +185,8 @@ mod tests {
                     if !self.rows.contains(&r) {
                         return bad();
                     }
-                    self.cells.insert((r, a["col"].as_u64().unwrap()), a["v"].as_i64().unwrap());
+                    self.cells
+                        .insert((r, a["col"].as_u64().unwrap()), a["v"].as_i64().unwrap());
                 }
                 _ => return bad(),
             }
@@ -160,18 +198,28 @@ mod tests {
     }
     impl SimDoc for GridDoc {
         fn initial() -> Self {
-            GridDoc { rows: vec![1, 2], cells: BTreeMap::new(), next: 1000 }
+            GridDoc {
+                rows: vec![1, 2],
+                cells: BTreeMap::new(),
+                next: 1000,
+            }
         }
         fn random_op(&self, rng: &mut Rng) -> Option<Self::Op> {
             // id는 클라이언트마다 겹치지 않게 난수 큰 값(실제는 id 임대)
             let fresh = 1_000_000 + rng.next_u64() % 1_000_000_000;
             Some(match rng.below(4) {
-                0 => CmdOp::new("ins_row", json!({"i": rng.below(self.rows.len() + 1), "id": fresh})),
+                0 => CmdOp::new(
+                    "ins_row",
+                    json!({"i": rng.below(self.rows.len() + 1), "id": fresh}),
+                ),
                 1 if !self.rows.is_empty() => {
                     let i = rng.below(self.rows.len());
                     CmdOp::new("del_row", json!({"i": i, "id": self.rows[i]}))
                 }
-                _ if !self.rows.is_empty() => CmdOp::new("set_cell", json!({"row": self.rows[rng.below(self.rows.len())], "col": rng.below(3), "v": rng.below(100)})),
+                _ if !self.rows.is_empty() => CmdOp::new(
+                    "set_cell",
+                    json!({"row": self.rows[rng.below(self.rows.len())], "col": rng.below(3), "v": rng.below(100)}),
+                ),
                 _ => return None,
             })
         }

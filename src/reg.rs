@@ -16,10 +16,16 @@ pub struct RegOp {
 
 impl RegOp {
     pub fn set(key: impl Into<String>, value: Value) -> Self {
-        RegOp { key: key.into(), value: Some(value) }
+        RegOp {
+            key: key.into(),
+            value: Some(value),
+        }
     }
     pub fn del(key: impl Into<String>) -> Self {
-        RegOp { key: key.into(), value: None }
+        RegOp {
+            key: key.into(),
+            value: None,
+        }
     }
 }
 
@@ -60,6 +66,9 @@ impl Doc for RegDoc {
 
 impl Invert<RegDoc> for RegOp {
     fn invert(&self, before: &RegDoc) -> Vec<Self> {
-        vec![RegOp { key: self.key.clone(), value: before.0.get(&self.key).cloned() }]
+        vec![RegOp {
+            key: self.key.clone(),
+            value: before.0.get(&self.key).cloned(),
+        }]
     }
 }

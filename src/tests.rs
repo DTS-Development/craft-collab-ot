@@ -23,7 +23,12 @@ fn tp1<D: Doc>(s: &D, a: &D::Op, b: &D::Op) -> Result<(), String> {
     if p1.canon() == p2.canon() {
         Ok(())
     } else {
-        Err(format!("TP1 실패\n  s={}\n  a={a:?}\n  b={b:?}\n  a->b'={}\n  b->a'={}", s.canon(), p1.canon(), p2.canon()))
+        Err(format!(
+            "TP1 실패\n  s={}\n  a={a:?}\n  b={b:?}\n  a->b'={}\n  b->a'={}",
+            s.canon(),
+            p1.canon(),
+            p2.canon()
+        ))
     }
 }
 
@@ -36,12 +41,20 @@ fn all_seq_ops(d: &SeqDoc, fresh: u64) -> Vec<SeqOp> {
     let n = d.0.len();
     let mut v = vec![];
     for i in 0..=n {
-        v.push(SeqOp::Ins { i, id: fresh, v: json!("x") });
+        v.push(SeqOp::Ins {
+            i,
+            id: fresh,
+            v: json!("x"),
+        });
     }
     for i in 0..n {
         v.push(SeqOp::Del { i, id: d.0[i].0 });
         for to in 0..n {
-            v.push(SeqOp::Mov { id: d.0[i].0, from: i, to });
+            v.push(SeqOp::Mov {
+                id: d.0[i].0,
+                from: i,
+                to,
+            });
         }
     }
     v
@@ -65,7 +78,16 @@ fn seq_tp1_exhaustive() {
 fn reg_tp1_exhaustive() {
     let mut s = RegDoc::default();
     s.apply(&RegOp::set("a", json!(1))).unwrap();
-    let ops: Vec<RegOp> = ["a", "b"].iter().flat_map(|k| vec![RegOp::set(*k, json!(7)), RegOp::set(*k, json!(8)), RegOp::del(*k)]).collect();
+    let ops: Vec<RegOp> = ["a", "b"]
+        .iter()
+        .flat_map(|k| {
+            vec![
+                RegOp::set(*k, json!(7)),
+                RegOp::set(*k, json!(8)),
+                RegOp::del(*k),
+            ]
+        })
+        .collect();
     for a in &ops {
         for b in &ops {
             tp1(&s, a, b).unwrap_or_else(|e| panic!("{e}"));
@@ -81,14 +103,22 @@ impl SimDoc for SeqDoc {
         let fresh = 1_000 + rng.next_u64() % 1_000_000_000_000;
         let n = self.0.len();
         Some(match rng.below(3) {
-            0 => SeqOp::Ins { i: rng.below(n + 1), id: fresh, v: json!(fresh) },
+            0 => SeqOp::Ins {
+                i: rng.below(n + 1),
+                id: fresh,
+                v: json!(fresh),
+            },
             1 if n > 0 => {
                 let i = rng.below(n);
                 SeqOp::Del { i, id: self.0[i].0 }
             }
             _ if n > 0 => {
                 let i = rng.below(n);
-                SeqOp::Mov { id: self.0[i].0, from: i, to: rng.below(n) }
+                SeqOp::Mov {
+                    id: self.0[i].0,
+                    from: i,
+                    to: rng.below(n),
+                }
             }
             _ => return None,
         })
@@ -101,7 +131,11 @@ impl SimDoc for RegDoc {
     }
     fn random_op(&self, rng: &mut Rng) -> Option<RegOp> {
         let key = format!("k{}", rng.below(4));
-        Some(if rng.chance(1, 4) { RegOp::del(key) } else { RegOp::set(key, json!(rng.below(1000))) })
+        Some(if rng.chance(1, 4) {
+            RegOp::del(key)
+        } else {
+            RegOp::set(key, json!(rng.below(1000)))
+        })
     }
 }
 
@@ -129,7 +163,9 @@ fn seq_invert_roundtrip() {
     for _ in 0..500 {
         let mut d = seq_doc(rng.below(5));
         for _ in 0..6 {
-            let Some(op) = d.random_op(&mut rng) else { continue };
+            let Some(op) = d.random_op(&mut rng) else {
+                continue;
+            };
             let before = d.clone();
             d.apply(&op).unwrap();
             let inv = op.invert(&before);
@@ -156,11 +192,29 @@ fn reg_invert_roundtrip() {
 fn wire_shapes() {
     let v: Value = serde_json::to_value(RegOp::set("k", json!(1))).unwrap();
     assert_eq!(v, json!({"t": "reg", "key": "k", "v": 1}));
-    assert_eq!(serde_json::to_value(RegOp::del("k")).unwrap(), json!({"t": "reg", "key": "k"}));
-    let m = SeqOp::Mov { id: 3, from: 1, to: 2 };
-    assert_eq!(serde_json::to_value(&m).unwrap(), json!({"t": "mov", "id": 3, "from": 1, "to": 2}));
-    let back: SeqOp = serde_json::from_value(json!({"t": "ins", "i": 0, "id": 9, "v": "a"})).unwrap();
-    assert_eq!(back, SeqOp::Ins { i: 0, id: 9, v: json!("a") });
+    assert_eq!(
+        serde_json::to_value(RegOp::del("k")).unwrap(),
+        json!({"t": "reg", "key": "k"})
+    );
+    let m = SeqOp::Mov {
+        id: 3,
+        from: 1,
+        to: 2,
+    };
+    assert_eq!(
+        serde_json::to_value(&m).unwrap(),
+        json!({"t": "mov", "id": 3, "from": 1, "to": 2})
+    );
+    let back: SeqOp =
+        serde_json::from_value(json!({"t": "ins", "i": 0, "id": 9, "v": "a"})).unwrap();
+    assert_eq!(
+        back,
+        SeqOp::Ins {
+            i: 0,
+            id: 9,
+            v: json!("a")
+        }
+    );
 }
 
 /// 순차 묶음끼리도 같은 상태로 수렴한다(transform_seq 격자).
@@ -186,7 +240,12 @@ fn seq_batches_converge() {
         let (a2, b2) = transform_seq(&a, &b, true);
         let p1 = apply_all(&apply_all(&s, &a).unwrap(), &b2).unwrap();
         let p2 = apply_all(&apply_all(&s, &b).unwrap(), &a2).unwrap();
-        assert_eq!(p1.canon(), p2.canon(), "iter {it}\n s={}\n a={a:?}\n b={b:?}", s.canon());
+        assert_eq!(
+            p1.canon(),
+            p2.canon(),
+            "iter {it}\n s={}\n a={a:?}\n b={b:?}",
+            s.canon()
+        );
     }
 }
 
@@ -210,14 +269,27 @@ fn transform_seq_loop_equals_the_old_recursion() {
         };
         let (a, b) = (mk(&mut rng), mk(&mut rng));
         for first in [true, false] {
-            assert_eq!(transform_seq(&a, &b, first), transform_seq_rec(&a, &b, first), "iter {it} seq\n a={a:?}\n b={b:?}");
+            assert_eq!(
+                transform_seq(&a, &b, first),
+                transform_seq_rec(&a, &b, first),
+                "iter {it} seq\n a={a:?}\n b={b:?}"
+            );
         }
         let regs = |rng: &mut Rng| -> Vec<RegOp> {
-            (0..1 + rng.below(8)).map(|_| RegOp { key: format!("k{}", rng.below(4)), value: rng.chance(1, 2).then(|| json!(rng.below(9))) }).collect()
+            (0..1 + rng.below(8))
+                .map(|_| RegOp {
+                    key: format!("k{}", rng.below(4)),
+                    value: rng.chance(1, 2).then(|| json!(rng.below(9))),
+                })
+                .collect()
         };
         let (ra, rb) = (regs(&mut rng), regs(&mut rng));
         for first in [true, false] {
-            assert_eq!(transform_seq(&ra, &rb, first), transform_seq_rec(&ra, &rb, first), "iter {it} reg");
+            assert_eq!(
+                transform_seq(&ra, &rb, first),
+                transform_seq_rec(&ra, &rb, first),
+                "iter {it} reg"
+            );
         }
     }
 }
@@ -227,7 +299,14 @@ fn transform_seq_loop_equals_the_old_recursion() {
 fn transform_seq_does_not_overflow_the_stack_on_big_bundles() {
     use crate::core::transform_seq;
     let go = || {
-        let reg = |n: usize, p: &str| -> Vec<RegOp> { (0..n).map(|i| RegOp { key: format!("{p}{}", i % 50), value: Some(json!(i)) }).collect() };
+        let reg = |n: usize, p: &str| -> Vec<RegOp> {
+            (0..n)
+                .map(|i| RegOp {
+                    key: format!("{p}{}", i % 50),
+                    value: Some(json!(i)),
+                })
+                .collect()
+        };
         for (n, m) in [(10_000, 1), (1, 10_000), (2_000, 2_000), (5_000, 1)] {
             let (a, b) = (reg(n, "k"), reg(m, "k"));
             let t = std::time::Instant::now();
@@ -240,14 +319,26 @@ fn transform_seq_does_not_overflow_the_stack_on_big_bundles() {
         let (a2, b2) = transform_seq(&a, &b, true);
         assert_eq!((a2.len(), b2.len()), (2_000, 2_000));
     };
-    std::thread::Builder::new().stack_size(1 << 20).spawn(go).unwrap().join().unwrap();
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(go)
+        .unwrap()
+        .join()
+        .unwrap();
 }
 
 /// 서로 건드리지 않는 묶음은 op마다 반대편 묶음을 새로 복사하지 않는다(n×m 복사): 키가 모두 다른 큰 묶음이 곧바로 끝난다.
 #[test]
 fn transform_seq_skips_independent_ops_without_copying() {
     use crate::core::transform_seq;
-    let reg = |n: usize, p: &str| -> Vec<RegOp> { (0..n).map(|i| RegOp { key: format!("{p}{i}"), value: Some(json!(i)) }).collect() };
+    let reg = |n: usize, p: &str| -> Vec<RegOp> {
+        (0..n)
+            .map(|i| RegOp {
+                key: format!("{p}{i}"),
+                value: Some(json!(i)),
+            })
+            .collect()
+    };
     let (a, b) = (reg(5_000, "a"), reg(5_000, "b"));
     let t = std::time::Instant::now();
     let (a2, b2) = transform_seq(&a, &b, true);

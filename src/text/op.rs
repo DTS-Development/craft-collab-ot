@@ -23,7 +23,12 @@ struct Wire {
 
 impl Serialize for TextOp {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        Wire { t: "text".into(), key: self.key.clone(), d: self.delta.ops().to_vec() }.serialize(s)
+        Wire {
+            t: "text".into(),
+            key: self.key.clone(),
+            d: self.delta.ops().to_vec(),
+        }
+        .serialize(s)
     }
 }
 
@@ -33,7 +38,10 @@ impl<'de> Deserialize<'de> for TextOp {
         if w.t != "text" {
             return Err(serde::de::Error::custom("text op가 아니다"));
         }
-        Ok(TextOp { key: w.key, delta: Delta::from_ops(w.d) })
+        Ok(TextOp {
+            key: w.key,
+            delta: Delta::from_ops(w.d),
+        })
     }
 }
 
@@ -48,7 +56,10 @@ impl Transform for TextOp {
         if delta.is_empty() {
             Vec::new()
         } else {
-            vec![TextOp { key: self.key.clone(), delta }]
+            vec![TextOp {
+                key: self.key.clone(),
+                delta,
+            }]
         }
     }
 }
@@ -82,6 +93,9 @@ impl Invert<TextDoc> for TextOp {
     fn invert(&self, before: &TextDoc) -> Vec<Self> {
         let empty = Delta::new();
         let base = before.0.get(&self.key).unwrap_or(&empty);
-        vec![TextOp { key: self.key.clone(), delta: self.delta.invert(base) }]
+        vec![TextOp {
+            key: self.key.clone(),
+            delta: self.delta.invert(base),
+        }]
     }
 }

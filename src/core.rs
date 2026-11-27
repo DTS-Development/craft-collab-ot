@@ -43,7 +43,10 @@ pub fn transform_seq<T: Transform>(a: &[T], b: &[T], a_first: bool) -> (Vec<T>, 
         return (a.to_vec(), b.to_vec());
     }
     if a.len() == 1 && b.len() == 1 {
-        return (a[0].transform(&b[0], a_first), b[0].transform(&a[0], !a_first));
+        return (
+            a[0].transform(&b[0], a_first),
+            b[0].transform(&a[0], !a_first),
+        );
     }
     // 재귀 깊이가 입력 길이가 아니라 "op가 여러 개로 쪼개진 겹침 수"에만 비례하도록 반복문으로 푼다
     // (원격 묶음 하나가 스택을 넘기지 못하게). 순서와 결과는 옛 재귀(`transform_seq_rec`)와 같다.
@@ -86,7 +89,10 @@ pub(crate) fn transform_seq_rec<T: Transform>(a: &[T], b: &[T], a_first: bool) -
         return (a.to_vec(), b.to_vec());
     }
     if a.len() == 1 && b.len() == 1 {
-        return (a[0].transform(&b[0], a_first), b[0].transform(&a[0], !a_first));
+        return (
+            a[0].transform(&b[0], a_first),
+            b[0].transform(&a[0], !a_first),
+        );
     }
     if a.len() > 1 {
         let (a0, rest) = a.split_at(1);

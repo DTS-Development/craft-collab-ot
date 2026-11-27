@@ -126,13 +126,19 @@ struct Iter<'a> {
 
 impl<'a> Iter<'a> {
     fn new(d: &'a Delta) -> Self {
-        Iter { ops: &d.ops, idx: 0, off: 0 }
+        Iter {
+            ops: &d.ops,
+            idx: 0,
+            off: 0,
+        }
     }
     fn has_next(&self) -> bool {
         self.idx < self.ops.len()
     }
     fn peek_len(&self) -> usize {
-        self.ops.get(self.idx).map_or(usize::MAX, |o| o.len() - self.off)
+        self.ops
+            .get(self.idx)
+            .map_or(usize::MAX, |o| o.len() - self.off)
     }
     fn peek(&self) -> Option<&Op> {
         self.ops.get(self.idx)
@@ -146,12 +152,18 @@ impl<'a> Iter<'a> {
     /// 최대 `len`만큼 잘라 가져온다. 소진 상태면 속성 없는 retain.
     fn next(&mut self, len: usize) -> Op {
         let Some(op) = self.ops.get(self.idx) else {
-            return Op::Retain { n: len, attrs: None };
+            return Op::Retain {
+                n: len,
+                attrs: None,
+            };
         };
         let remain = op.len() - self.off;
         let take = len.min(remain);
         let out = match op {
-            Op::Retain { attrs, .. } => Op::Retain { n: take, attrs: attrs.clone() },
+            Op::Retain { attrs, .. } => Op::Retain {
+                n: take,
+                attrs: attrs.clone(),
+            },
             Op::Delete(_) => Op::Delete(take),
             Op::Insert { ins, attrs } => {
                 let ins = match ins {
@@ -166,7 +178,10 @@ impl<'a> Iter<'a> {
                         Insert::Embed(v.clone())
                     }
                 };
-                Op::Insert { ins, attrs: attrs.clone() }
+                Op::Insert {
+                    ins,
+                    attrs: attrs.clone(),
+                }
             }
         };
         if take == remain {
@@ -194,15 +209,24 @@ impl Delta {
 
     /// 만들기 쉬운 빌더 함수들. 빈 길이는 무시, 인접 op는 합쳐진다.
     pub fn retain(mut self, n: usize, attrs: Option<Attrs>) -> Self {
-        self.push(Op::Retain { n, attrs: norm(attrs) });
+        self.push(Op::Retain {
+            n,
+            attrs: norm(attrs),
+        });
         self
     }
     pub fn insert(mut self, text: &str, attrs: Option<Attrs>) -> Self {
-        self.push(Op::Insert { ins: Insert::Text(text.to_string()), attrs: norm(attrs) });
+        self.push(Op::Insert {
+            ins: Insert::Text(text.to_string()),
+            attrs: norm(attrs),
+        });
         self
     }
     pub fn insert_embed(mut self, v: Value, attrs: Option<Attrs>) -> Self {
-        self.push(Op::Insert { ins: Insert::Embed(v), attrs: norm(attrs) });
+        self.push(Op::Insert {
+            ins: Insert::Embed(v),
+            attrs: norm(attrs),
+        });
         self
     }
     pub fn delete(mut self, n: usize) -> Self {
@@ -216,8 +240,14 @@ impl Delta {
             return;
         }
         let op = match op {
-            Op::Retain { n, attrs } => Op::Retain { n, attrs: norm(attrs) },
-            Op::Insert { ins, attrs } => Op::Insert { ins, attrs: norm(attrs) },
+            Op::Retain { n, attrs } => Op::Retain {
+                n,
+                attrs: norm(attrs),
+            },
+            Op::Insert { ins, attrs } => Op::Insert {
+                ins,
+                attrs: norm(attrs),
+            },
             d => d,
         };
         if let Some(last) = self.ops.last_mut() {
@@ -237,8 +267,14 @@ impl Delta {
                     return;
                 }
                 (
-                    Op::Insert { ins: Insert::Text(a), attrs: x },
-                    Op::Insert { ins: Insert::Text(b), attrs: y },
+                    Op::Insert {
+                        ins: Insert::Text(a),
+                        attrs: x,
+                    },
+                    Op::Insert {
+                        ins: Insert::Text(b),
+                        attrs: y,
+                    },
                 ) if x == y => {
                     a.push_str(b);
                     return;
@@ -326,7 +362,11 @@ impl Delta {
     pub fn compose_checked(&self, other: &Delta) -> Result<Delta, String> {
         // 변경이 결과 문서보다 길면(길이가 넘치는 값 포함) 거절한다.
         if other.base_len() > self.target_len() {
-            return Err(format!("delta가 문서 길이 {}보다 길다({})", self.target_len(), other.base_len()));
+            return Err(format!(
+                "delta가 문서 길이 {}보다 길다({})",
+                self.target_len(),
+                other.base_len()
+            ));
         }
         // `other`가 `self`의 결과 문서를 가르는 지점(누적 위치).
         let mut cuts = Vec::new();
@@ -401,10 +441,16 @@ impl Delta {
                     }
                     at = at.saturating_add(*n);
                 }
-                Op::Retain { n, attrs: Some(attrs) } => {
+                Op::Retain {
+                    n,
+                    attrs: Some(attrs),
+                } => {
                     for piece in base.slice(at, at.saturating_add(*n)).ops {
                         let len = piece.len();
-                        inv.push(Op::Retain { n: len, attrs: invert_attrs(attrs, piece.attrs()) });
+                        inv.push(Op::Retain {
+                            n: len,
+                            attrs: invert_attrs(attrs, piece.attrs()),
+                        });
                     }
                     at = at.saturating_add(*n);
                 }
@@ -457,9 +503,16 @@ impl Delta {
     /// 문서 delta(`self`, 삽입만 있음)에 변경 delta를 적용해도 되는지 검사한다
     /// (길이 초과·글자 경계 위반). 원격에서 온 delta를 적용하기 전에 쓴다.
     pub fn check_on(&self, change: &Delta) -> Result<(), String> {
-        let total: usize = self.ops.iter().map(Op::len).fold(0usize, usize::saturating_add);
+        let total: usize = self
+            .ops
+            .iter()
+            .map(Op::len)
+            .fold(0usize, usize::saturating_add);
         if change.base_len() > total {
-            return Err(format!("delta가 문서 길이 {total}보다 길다({})", change.base_len()));
+            return Err(format!(
+                "delta가 문서 길이 {total}보다 길다({})",
+                change.base_len()
+            ));
         }
         // 변경이 문서를 가르는 지점(누적 위치)이 모두 글자·embed 경계인지 한 번에 훑는다.
         let mut cuts = Vec::new();
@@ -489,8 +542,14 @@ impl Delta {
 
 fn boundary(op: &Op, off: usize) -> bool {
     match op {
-        Op::Insert { ins: Insert::Text(s), .. } => s.is_char_boundary(off),
-        Op::Insert { ins: Insert::Embed(_), .. } => false,
+        Op::Insert {
+            ins: Insert::Text(s),
+            ..
+        } => s.is_char_boundary(off),
+        Op::Insert {
+            ins: Insert::Embed(_),
+            ..
+        } => false,
         _ => true,
     }
 }
@@ -512,8 +571,18 @@ struct RawOp {
 impl Serialize for Op {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let raw = match self {
-            Op::Retain { n, attrs } => RawOp { insert: None, retain: Some(*n), delete: None, attributes: attrs.clone() },
-            Op::Delete(n) => RawOp { insert: None, retain: None, delete: Some(*n), attributes: None },
+            Op::Retain { n, attrs } => RawOp {
+                insert: None,
+                retain: Some(*n),
+                delete: None,
+                attributes: attrs.clone(),
+            },
+            Op::Delete(n) => RawOp {
+                insert: None,
+                retain: None,
+                delete: Some(*n),
+                attributes: None,
+            },
             Op::Insert { ins, attrs } => RawOp {
                 insert: Some(match ins {
                     Insert::Text(t) => Value::String(t.clone()),
@@ -534,10 +603,14 @@ impl<'de> Deserialize<'de> for Op {
         let raw = RawOp::deserialize(d)?;
         let attrs = norm(raw.attributes);
         match (raw.insert, raw.retain, raw.delete) {
-            (Some(Value::String(t)), None, None) if !t.is_empty() => {
-                Ok(Op::Insert { ins: Insert::Text(t), attrs })
-            }
-            (Some(v @ Value::Object(_)), None, None) => Ok(Op::Insert { ins: Insert::Embed(v), attrs }),
+            (Some(Value::String(t)), None, None) if !t.is_empty() => Ok(Op::Insert {
+                ins: Insert::Text(t),
+                attrs,
+            }),
+            (Some(v @ Value::Object(_)), None, None) => Ok(Op::Insert {
+                ins: Insert::Embed(v),
+                attrs,
+            }),
             (None, Some(n), None) if n > 0 => Ok(Op::Retain { n, attrs }),
             (None, None, Some(n)) if n > 0 && attrs.is_none() => Ok(Op::Delete(n)),
             _ => Err(D::Error::custom("올바르지 않은 delta op")),

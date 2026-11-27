@@ -32,16 +32,32 @@ impl Transform for Step {
         match (*self, *other) {
             (Step::Ins { i, id }, Step::Ins { i: j, .. }) => {
                 // 같은 자리 삽입은 서버 순서가 앞선 쪽이 앞에 온다
-                vec![Step::Ins { i: if j < i || (j == i && !a_first) { i + 1 } else { i }, id }]
+                vec![Step::Ins {
+                    i: if j < i || (j == i && !a_first) {
+                        i + 1
+                    } else {
+                        i
+                    },
+                    id,
+                }]
             }
-            (Step::Ins { i, id }, Step::Del { i: j, .. }) => vec![Step::Ins { i: if j < i { i - 1 } else { i }, id }],
-            (Step::Del { i, id }, Step::Ins { i: j, .. }) => vec![Step::Del { i: if j <= i { i + 1 } else { i }, id }],
+            (Step::Ins { i, id }, Step::Del { i: j, .. }) => vec![Step::Ins {
+                i: if j < i { i - 1 } else { i },
+                id,
+            }],
+            (Step::Del { i, id }, Step::Ins { i: j, .. }) => vec![Step::Del {
+                i: if j <= i { i + 1 } else { i },
+                id,
+            }],
             (Step::Del { i, id }, Step::Del { i: j, id: id2 }) => {
                 if j == i {
                     debug_assert_eq!(id, id2);
                     vec![] // 같은 원소를 둘 다 지웠다
                 } else {
-                    vec![Step::Del { i: if j < i { i - 1 } else { i }, id }]
+                    vec![Step::Del {
+                        i: if j < i { i - 1 } else { i },
+                        id,
+                    }]
                 }
             }
         }
@@ -64,16 +80,28 @@ fn id_of(op: &SeqOp) -> Id {
 
 impl Transform for SeqOp {
     fn transform(&self, other: &Self, a_first: bool) -> Vec<Self> {
-        let same = id_of(self) == id_of(other) && !matches!(self, SeqOp::Ins { .. }) && !matches!(other, SeqOp::Ins { .. });
+        let same = id_of(self) == id_of(other)
+            && !matches!(self, SeqOp::Ins { .. })
+            && !matches!(other, SeqOp::Ins { .. });
         if same {
             match (self, other) {
                 // 같은 원소를 이미 지웠다: self는 할 일이 없다
                 (_, SeqOp::Del { .. }) => return vec![],
                 // 지우려는 원소를 상대가 옮겼다: 옮겨진 자리에서 지운다
-                (SeqOp::Del { id, .. }, SeqOp::Mov { to, .. }) => return vec![SeqOp::Del { i: *to, id: *id }],
+                (SeqOp::Del { id, .. }, SeqOp::Mov { to, .. }) => {
+                    return vec![SeqOp::Del { i: *to, id: *id }]
+                }
                 // 둘 다 같은 원소를 옮겼다: 서버 순서가 늦은 쪽이 이긴다
                 (SeqOp::Mov { id, to, .. }, SeqOp::Mov { to: other_to, .. }) => {
-                    return if a_first { vec![] } else { vec![SeqOp::Mov { id: *id, from: *other_to, to: *to }] };
+                    return if a_first {
+                        vec![]
+                    } else {
+                        vec![SeqOp::Mov {
+                            id: *id,
+                            from: *other_to,
+                            to: *to,
+                        }]
+                    };
                 }
                 _ => {}
             }
@@ -81,9 +109,19 @@ impl Transform for SeqOp {
         // 나머지는 단계로 풀어 변환한다(서로 다른 원소 사이의 위치 보정)
         let (a2, _) = transform_seq(&steps(self), &steps(other), a_first);
         match (self, a2.as_slice()) {
-            (SeqOp::Ins { v, .. }, [Step::Ins { i, id }]) => vec![SeqOp::Ins { i: *i, id: *id, v: v.clone() }],
+            (SeqOp::Ins { v, .. }, [Step::Ins { i, id }]) => vec![SeqOp::Ins {
+                i: *i,
+                id: *id,
+                v: v.clone(),
+            }],
             (SeqOp::Del { .. }, [Step::Del { i, id }]) => vec![SeqOp::Del { i: *i, id: *id }],
-            (SeqOp::Mov { .. }, [Step::Del { i: f, id }, Step::Ins { i: t, .. }]) => vec![SeqOp::Mov { id: *id, from: *f, to: *t }],
+            (SeqOp::Mov { .. }, [Step::Del { i: f, id }, Step::Ins { i: t, .. }]) => {
+                vec![SeqOp::Mov {
+                    id: *id,
+                    from: *f,
+                    to: *t,
+                }]
+            }
             _ => vec![], // 같은 원소의 삽입 충돌 등 정상 흐름에서 오지 않는 조합
         }
     }
@@ -124,7 +162,12 @@ impl Doc for SeqDoc {
         Ok(())
     }
     fn canon(&self) -> Value {
-        Value::Array(self.0.iter().map(|(id, v)| serde_json::json!([id, v])).collect())
+        Value::Array(
+            self.0
+                .iter()
+                .map(|(id, v)| serde_json::json!([id, v]))
+                .collect(),
+        )
     }
 }
 
@@ -132,8 +175,16 @@ impl Invert<SeqDoc> for SeqOp {
     fn invert(&self, before: &SeqDoc) -> Vec<Self> {
         match self {
             SeqOp::Ins { i, id, .. } => vec![SeqOp::Del { i: *i, id: *id }],
-            SeqOp::Del { i, id } => vec![SeqOp::Ins { i: *i, id: *id, v: before.0.get(*i).map(|e| e.1.clone()).unwrap_or(Value::Null) }],
-            SeqOp::Mov { id, from, to } => vec![SeqOp::Mov { id: *id, from: *to, to: *from }],
+            SeqOp::Del { i, id } => vec![SeqOp::Ins {
+                i: *i,
+                id: *id,
+                v: before.0.get(*i).map(|e| e.1.clone()).unwrap_or(Value::Null),
+            }],
+            SeqOp::Mov { id, from, to } => vec![SeqOp::Mov {
+                id: *id,
+                from: *to,
+                to: *from,
+            }],
         }
     }
 }
