@@ -19,7 +19,7 @@
 
 ## 쓰는 곳
 
-DTS-Development의 문서 편집기 포크(deckcraft 등)가 경로 의존으로 가져다 쓴다. 서버·브라우저 연결 쪽은
+DTS-Development의 문서 편집기 포크(deckcraft 등)가 Cargo git 의존(rev 고정)으로 가져다 쓴다. 서버·브라우저 연결 쪽은
 dts-craft의 `@dts-development/doc-sync`(서버)와 `@dts-development/craft-bridge`(호스트)가 맡는다.
 
 ## 시험
