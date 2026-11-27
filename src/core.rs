@@ -52,6 +52,11 @@ pub fn transform_seq<T: Transform>(a: &[T], b: &[T], a_first: bool) -> (Vec<T>, 
         let mut cur_b = b.to_vec();
         let mut out = Vec::with_capacity(a.len());
         for ai in a {
+            // b의 어느 op와도 건드리지 않으면 변환·복사 없이 그대로 지나간다(n×m번 cur_b를 새로 만들지 않는다)
+            if cur_b.iter().all(|x| ai.independent(x)) {
+                out.push(ai.clone());
+                continue;
+            }
             let (t, nb) = transform_seq(std::slice::from_ref(ai), &cur_b, a_first);
             out.extend(t);
             cur_b = nb;

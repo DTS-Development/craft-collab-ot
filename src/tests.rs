@@ -242,3 +242,15 @@ fn transform_seq_does_not_overflow_the_stack_on_big_bundles() {
     };
     std::thread::Builder::new().stack_size(1 << 20).spawn(go).unwrap().join().unwrap();
 }
+
+/// 서로 건드리지 않는 묶음은 op마다 반대편 묶음을 새로 복사하지 않는다(n×m 복사): 키가 모두 다른 큰 묶음이 곧바로 끝난다.
+#[test]
+fn transform_seq_skips_independent_ops_without_copying() {
+    use crate::core::transform_seq;
+    let reg = |n: usize, p: &str| -> Vec<RegOp> { (0..n).map(|i| RegOp { key: format!("{p}{i}"), value: Some(json!(i)) }).collect() };
+    let (a, b) = (reg(5_000, "a"), reg(5_000, "b"));
+    let t = std::time::Instant::now();
+    let (a2, b2) = transform_seq(&a, &b, true);
+    assert_eq!((a2, b2), (a, b));
+    eprintln!("independent 5000x5000: {:?}", t.elapsed());
+}

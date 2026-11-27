@@ -335,13 +335,22 @@ impl Delta {
             at = at.saturating_add(op.len());
             cuts.push(at);
         }
+        // cuts와 op 위치가 모두 앞으로만 가므로 cuts를 가리키는 인덱스도 앞으로만 옮겨 전체가 선형이다
         let mut pos = 0usize;
+        let mut ci = 0usize;
         for op in self.ops.iter().filter(|o| !o.is_delete()) {
-            let l = op.len();
-            if cuts.iter().any(|c| *c > pos && *c < pos + l && !boundary(op, *c - pos)) {
-                return Err("delta가 글자 경계 안쪽을 가리킨다".into());
+            let end = pos.saturating_add(op.len());
+            while ci < cuts.len() && cuts[ci] <= pos {
+                ci += 1;
             }
-            pos = pos.saturating_add(l);
+            let mut k = ci;
+            while k < cuts.len() && cuts[k] < end {
+                if !boundary(op, cuts[k] - pos) {
+                    return Err("delta가 글자 경계 안쪽을 가리킨다".into());
+                }
+                k += 1;
+            }
+            pos = end;
         }
         Ok(self.compose(other))
     }

@@ -286,3 +286,17 @@ fn lengths_that_overflow_are_refused() {
         assert!(doc.compose_checked(&ch).is_err(), "case {i}");
     }
 }
+
+/// compose_checked는 cuts × ops가 아니라 선형이다: 속성이 번갈아 붙어 합쳐지지 않는 4만 op를 모두 가르는 변경도 곧바로 끝난다.
+#[test]
+fn compose_checked_is_linear_in_cuts_and_ops() {
+    let n = 40_000;
+    let (a, b) = (Attrs::from([("b".to_string(), json!(1))]), Attrs::from([("i".to_string(), json!(1))]));
+    let doc = (0..n).fold(Delta::new(), |d, i| d.insert("x", Some(if i % 2 == 0 { a.clone() } else { b.clone() })));
+    // 글자마다 retain(속성 바꿈)과 delete가 번갈아 와서 cuts가 문서 op 수만큼 생긴다
+    let ch = (0..n).fold(Delta::new(), |d, i| if i % 2 == 0 { d.retain(1, Some(Attrs::from([("c".to_string(), json!(i))]))) } else { d.delete(1) });
+    let t = std::time::Instant::now();
+    let out = doc.compose_checked(&ch).unwrap();
+    assert!(t.elapsed().as_secs() < 5, "선형이어야 한다: {:?}", t.elapsed());
+    assert_eq!(out, doc.compose(&ch));
+}
