@@ -114,6 +114,10 @@ pub struct Delta {
 }
 
 /// 줄 끝까지 소진된 쪽은 "무한 retain"으로 본다(Quill과 같음).
+///
+/// 주의: `next`는 글자 경계가 아닌 곳이나 embed 안쪽에서 자르면 panic한다. 그래서 `compose`·`transform`
+/// 같은 이 반복자를 쓰는 연산은 원격에서 온 delta에 대해 먼저 [`Delta::check_on`]으로 검사한 뒤에만
+/// 불러야 한다(검사 없이 쓰려면 `Result`를 돌려주는 [`Delta::compose_checked`]).
 struct Iter<'a> {
     ops: &'a [Op],
     idx: usize,
@@ -278,6 +282,9 @@ impl Delta {
     }
 
     /// `self` 다음에 `other`를 적용한 것과 같은 하나의 delta.
+    ///
+    /// 주의: `other`가 `self`의 삽입 글자 한가운데(글자 경계가 아닌 곳)나 embed 안쪽을 가르면 panic한다.
+    /// 원격에서 온 delta는 먼저 [`Delta::check_on`]으로 검사하거나 [`Delta::compose_checked`]를 쓴다.
     pub fn compose(&self, other: &Delta) -> Delta {
         let (mut a, mut b) = (Iter::new(self), Iter::new(other));
         let mut out = Delta::new();
@@ -312,6 +319,27 @@ impl Delta {
             }
         }
         out.chop()
+    }
+
+    /// [`Delta::compose`]와 같되, `other`가 `self`의 삽입을 글자 경계가 아닌 곳에서 자르면 panic하는 대신
+    /// `Err`를 돌려준다. 원격 입력을 검사 없이 합칠 때 쓴다.
+    pub fn compose_checked(&self, other: &Delta) -> Result<Delta, String> {
+        // `other`가 `self`의 결과 문서를 가르는 지점(누적 위치).
+        let mut cuts = Vec::new();
+        let mut at = 0usize;
+        for op in other.ops.iter().filter(|o| !o.is_insert()) {
+            at += op.len();
+            cuts.push(at);
+        }
+        let mut pos = 0usize;
+        for op in self.ops.iter().filter(|o| !o.is_delete()) {
+            let l = op.len();
+            if cuts.iter().any(|c| *c > pos && *c < pos + l && !boundary(op, *c - pos)) {
+                return Err("delta가 글자 경계 안쪽을 가리킨다".into());
+            }
+            pos += l;
+        }
+        Ok(self.compose(other))
     }
 
     /// `self`가 먼저 적용된 문서에 맞게 `other`를 바꾼다.

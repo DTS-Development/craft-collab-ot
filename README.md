@@ -17,6 +17,12 @@
 | `text` | 서식 텍스트 Delta OT(quill-delta와 같은 결과를 내는지 `tests/quill_diff.rs`가 견준다) |
 | `sim` | 서버 순서 하네스와 수렴 퍼즈(편집기 여럿이 무작위로 편집해도 같은 문서로 모이는지 확인) |
 
+## 원격 입력은 check_on 먼저
+
+`Delta::compose`·`transform`은 글자 경계가 아닌 곳이나 embed 안쪽을 자르는 delta를 받으면 panic한다.
+원격(다른 사람·서버)에서 온 delta는 문서에 합치기 전에 `Delta::check_on(문서, 변경)`으로 검사하거나, 검사와
+합성을 한 번에 하는 `Delta::compose_checked`(`Result`를 돌려줌)를 쓴다. `text::op`의 적용은 이미 검사한다.
+
 ## 쓰는 곳
 
 DTS-Development의 문서 편집기 포크(deckcraft 등)가 Cargo git 의존(rev 고정)으로 가져다 쓴다. 서버·브라우저 연결 쪽은

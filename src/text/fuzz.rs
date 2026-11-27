@@ -249,3 +249,19 @@ fn text_doc_converges_under_the_server_order_harness() {
         crate::sim::run_fuzz::<TextDoc>(0..200, clients, 40).unwrap();
     }
 }
+
+#[test]
+fn compose_checked_refuses_a_cut_inside_a_char_where_compose_would_panic() {
+    // "가"는 3바이트다. 두 번째 바이트에서 자르는 변경은 거절된다.
+    let a = Delta::new().insert("가나", None);
+    let bad = Delta::new().retain(1, None).delete(1);
+    assert!(a.compose_checked(&bad).is_err());
+    let ok = Delta::new().retain(3, None).delete(3);
+    assert_eq!(a.compose_checked(&ok).unwrap(), a.compose(&ok));
+    // embed 한가운데도 같다.
+    let e = Delta::new().insert_embed(serde_json::json!({"x": 1}), None);
+    assert!(e.compose_checked(&Delta::new().retain(1, None).delete(1)).is_err());
+    // 앞선 삭제는 결과 문서에 없으므로 위치를 세지 않는다.
+    let d = Delta::new().delete(3).insert("가", None);
+    assert!(d.compose_checked(&Delta::new().retain(3, None).delete(1)).is_ok());
+}
