@@ -17,7 +17,7 @@ impl Rng {
     pub fn new(seed: u64) -> Self {
         Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
     }
-    pub fn next(&mut self) -> u64 {
+    pub fn next_u64(&mut self) -> u64 {
         self.0 ^= self.0 >> 12;
         self.0 ^= self.0 << 25;
         self.0 ^= self.0 >> 27;
@@ -25,7 +25,7 @@ impl Rng {
     }
     /// 0..n (n > 0)
     pub fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
+        (self.next_u64() % n as u64) as usize
     }
     /// num/den 확률로 참
     pub fn chance(&mut self, num: usize, den: usize) -> bool {

@@ -5,14 +5,14 @@ use serde_json::{json, Value};
 
 struct Rng(u64);
 impl Rng {
-    fn next(&mut self) -> u64 {
+    fn next_u64(&mut self) -> u64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
         self.0
     }
     fn below(&mut self, n: usize) -> usize {
-        (self.next() % n as u64) as usize
+        (self.next_u64() % n as u64) as usize
     }
 }
 
@@ -213,7 +213,7 @@ impl crate::sim::SimDoc for TextDoc {
         TextDoc::default()
     }
     fn random_op(&self, rng: &mut crate::sim::Rng) -> Option<TextOp> {
-        let mut r = Rng(rng.next() | 1);
+        let mut r = Rng(rng.next_u64() | 1);
         let key = ["body", "cell"][r.below(2)].to_string();
         let doc = self.0.get(&key).cloned().unwrap_or_default();
         let delta = rand_change(&mut r, &doc);
@@ -263,5 +263,26 @@ fn compose_checked_refuses_a_cut_inside_a_char_where_compose_would_panic() {
     assert!(e.compose_checked(&Delta::new().retain(1, None).delete(1)).is_err());
     // 앞선 삭제는 결과 문서에 없으므로 위치를 세지 않는다.
     let d = Delta::new().delete(3).insert("가", None);
-    assert!(d.compose_checked(&Delta::new().retain(3, None).delete(1)).is_ok());
+    assert!(d.compose_checked(&Delta::new().delete(3)).is_ok());
+    assert!(d.compose_checked(&Delta::new().retain(3, None).delete(1)).is_err(), "문서보다 긴 변경");
+}
+
+/// 길이 합이 usize를 넘어 wrap되던 변경(실측 반례)은 거절된다.
+#[test]
+fn lengths_that_overflow_are_refused() {
+    let doc = Delta::new().insert("가나다abc", None);
+    let half = usize::MAX / 2 + 1; // 둘을 더하면 wrap(wasm32에서는 2^31 둘)
+    let b1 = Attrs::from([("b".to_string(), json!(1))]);
+    let cases = [
+        vec![Op::Retain { n: half, attrs: None }, Op::Retain { n: half, attrs: Some(b1.clone()) }],
+        vec![Op::Retain { n: usize::MAX, attrs: None }, Op::Retain { n: 2, attrs: Some(b1.clone()) }, Op::Insert { ins: Insert::Text("X".into()), attrs: None }],
+        vec![Op::Retain { n: half, attrs: None }, Op::Delete(half + 1)],
+        vec![Op::Delete(half), Op::Retain { n: half, attrs: None }],
+    ];
+    for (i, ops) in cases.into_iter().enumerate() {
+        let ch = Delta::from_ops(ops);
+        assert!(ch.base_len() > 12, "case {i}: base_len={}", ch.base_len());
+        assert!(doc.check_on(&ch).is_err(), "case {i}");
+        assert!(doc.compose_checked(&ch).is_err(), "case {i}");
+    }
 }

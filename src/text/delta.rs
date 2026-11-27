@@ -223,7 +223,7 @@ impl Delta {
         if let Some(last) = self.ops.last_mut() {
             match (last, &op) {
                 (Op::Delete(a), Op::Delete(b)) => {
-                    *a += b;
+                    *a = a.saturating_add(*b);
                     return;
                 }
                 (Op::Delete(_), Op::Insert { .. }) => {
@@ -233,7 +233,7 @@ impl Delta {
                     return;
                 }
                 (Op::Retain { n: a, attrs: x }, Op::Retain { n: b, attrs: y }) if x == y => {
-                    *a += b;
+                    *a = a.saturating_add(*b);
                     return;
                 }
                 (
@@ -270,7 +270,7 @@ impl Delta {
         self.ops
             .iter()
             .map(|o| if o.is_insert() { 0 } else { o.len() })
-            .sum()
+            .fold(0usize, usize::saturating_add)
     }
 
     /// 적용 뒤의 길이.
@@ -278,7 +278,7 @@ impl Delta {
         self.ops
             .iter()
             .map(|o| if o.is_delete() { 0 } else { o.len() })
-            .sum()
+            .fold(0usize, usize::saturating_add)
     }
 
     /// `self` 다음에 `other`를 적용한 것과 같은 하나의 delta.
@@ -324,11 +324,15 @@ impl Delta {
     /// [`Delta::compose`]와 같되, `other`가 `self`의 삽입을 글자 경계가 아닌 곳에서 자르면 panic하는 대신
     /// `Err`를 돌려준다. 원격 입력을 검사 없이 합칠 때 쓴다.
     pub fn compose_checked(&self, other: &Delta) -> Result<Delta, String> {
+        // 변경이 결과 문서보다 길면(길이가 넘치는 값 포함) 거절한다.
+        if other.base_len() > self.target_len() {
+            return Err(format!("delta가 문서 길이 {}보다 길다({})", self.target_len(), other.base_len()));
+        }
         // `other`가 `self`의 결과 문서를 가르는 지점(누적 위치).
         let mut cuts = Vec::new();
         let mut at = 0usize;
         for op in other.ops.iter().filter(|o| !o.is_insert()) {
-            at += op.len();
+            at = at.saturating_add(op.len());
             cuts.push(at);
         }
         let mut pos = 0usize;
@@ -337,7 +341,7 @@ impl Delta {
             if cuts.iter().any(|c| *c > pos && *c < pos + l && !boundary(op, *c - pos)) {
                 return Err("delta가 글자 경계 안쪽을 가리킨다".into());
             }
-            pos += l;
+            pos = pos.saturating_add(l);
         }
         Ok(self.compose(other))
     }
@@ -380,20 +384,20 @@ impl Delta {
                 Op::Insert { .. } => inv.push(Op::Delete(op.len())),
                 Op::Retain { n, attrs: None } => {
                     inv.push(Op::Retain { n: *n, attrs: None });
-                    at += n;
+                    at = at.saturating_add(*n);
                 }
                 Op::Delete(n) => {
-                    for piece in base.slice(at, at + n).ops {
+                    for piece in base.slice(at, at.saturating_add(*n)).ops {
                         inv.push(piece);
                     }
-                    at += n;
+                    at = at.saturating_add(*n);
                 }
                 Op::Retain { n, attrs: Some(attrs) } => {
-                    for piece in base.slice(at, at + n).ops {
+                    for piece in base.slice(at, at.saturating_add(*n)).ops {
                         let len = piece.len();
                         inv.push(Op::Retain { n: len, attrs: invert_attrs(attrs, piece.attrs()) });
                     }
-                    at += n;
+                    at = at.saturating_add(*n);
                 }
             }
         }
@@ -444,7 +448,7 @@ impl Delta {
     /// 문서 delta(`self`, 삽입만 있음)에 변경 delta를 적용해도 되는지 검사한다
     /// (길이 초과·글자 경계 위반). 원격에서 온 delta를 적용하기 전에 쓴다.
     pub fn check_on(&self, change: &Delta) -> Result<(), String> {
-        let total: usize = self.ops.iter().map(Op::len).sum();
+        let total: usize = self.ops.iter().map(Op::len).fold(0usize, usize::saturating_add);
         if change.base_len() > total {
             return Err(format!("delta가 문서 길이 {total}보다 길다({})", change.base_len()));
         }
@@ -452,7 +456,7 @@ impl Delta {
         let mut cuts = Vec::new();
         let mut at = 0usize;
         for op in change.ops.iter().filter(|o| !o.is_insert()) {
-            at += op.len();
+            at = at.saturating_add(op.len());
             cuts.push(at);
         }
         let mut ci = 0usize;
@@ -468,7 +472,7 @@ impl Delta {
                 }
                 ci += 1;
             }
-            pos += l;
+            pos = pos.saturating_add(l);
         }
         Ok(())
     }

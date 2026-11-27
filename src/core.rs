@@ -28,6 +28,11 @@ impl std::error::Error for OtError {}
 /// TP1: a가 b보다 앞서면, `apply(apply(s, a), b.transform(a, false)) == apply(apply(s, b), a.transform(b, true))`.
 pub trait Transform: Sized + Clone + Debug {
     fn transform(&self, other: &Self, a_first: bool) -> Vec<Self>;
+    /// 두 op가 서로 건드리지 않아 `transform`이 양쪽을 그대로 돌려주는가(true면 변환을 건너뛴다).
+    /// 확실하지 않으면 false로 둔다(기본값).
+    fn independent(&self, _other: &Self) -> bool {
+        false
+    }
 }
 
 /// op 열 `a`와 `b`(둘 다 같은 상태에서 시작하는 순차 묶음)를 서로 맞춘다.
@@ -40,18 +45,55 @@ pub fn transform_seq<T: Transform>(a: &[T], b: &[T], a_first: bool) -> (Vec<T>, 
     if a.len() == 1 && b.len() == 1 {
         return (a[0].transform(&b[0], a_first), b[0].transform(&a[0], !a_first));
     }
+    // 재귀 깊이가 입력 길이가 아니라 "op가 여러 개로 쪼개진 겹침 수"에만 비례하도록 반복문으로 푼다
+    // (원격 묶음 하나가 스택을 넘기지 못하게). 순서와 결과는 옛 재귀(`transform_seq_rec`)와 같다.
     if a.len() > 1 {
-        // a의 첫 op를 b 전체와 맞추고, 나머지는 그 결과 b와 맞춘다
+        // a의 op를 하나씩 현재의 b 전체와 맞추고, b는 그 결과로 바꿔 나간다
+        let mut cur_b = b.to_vec();
+        let mut out = Vec::with_capacity(a.len());
+        for ai in a {
+            let (t, nb) = transform_seq(std::slice::from_ref(ai), &cur_b, a_first);
+            out.extend(t);
+            cur_b = nb;
+        }
+        return (out, cur_b);
+    }
+    // a가 하나, b가 여럿: b의 op를 하나씩 현재의 a와 맞춘다
+    let mut cur_a = a.to_vec();
+    let mut bout = Vec::with_capacity(b.len());
+    for bj in b {
+        // 서로 건드리지 않는 op는 변환하지 않고 그대로 지나간다
+        if cur_a.iter().all(|x| x.independent(bj)) {
+            bout.push(bj.clone());
+            continue;
+        }
+        let (na, bt) = transform_seq(&cur_a, std::slice::from_ref(bj), a_first);
+        bout.extend(bt);
+        cur_a = na;
+    }
+    (cur_a, bout)
+}
+
+/// 옛 재귀 구현: 반복문 구현과 결과가 같은지 견주는 시험용이다.
+#[cfg(test)]
+pub(crate) fn transform_seq_rec<T: Transform>(a: &[T], b: &[T], a_first: bool) -> (Vec<T>, Vec<T>) {
+    if a.is_empty() || b.is_empty() {
+        return (a.to_vec(), b.to_vec());
+    }
+    if a.len() == 1 && b.len() == 1 {
+        return (a[0].transform(&b[0], a_first), b[0].transform(&a[0], !a_first));
+    }
+    if a.len() > 1 {
         let (a0, rest) = a.split_at(1);
-        let (a0t, bt) = transform_seq(a0, b, a_first);
-        let (rest_t, bt2) = transform_seq(rest, &bt, a_first);
+        let (a0t, bt) = transform_seq_rec(a0, b, a_first);
+        let (rest_t, bt2) = transform_seq_rec(rest, &bt, a_first);
         let mut out = a0t;
         out.extend(rest_t);
         return (out, bt2);
     }
     let (b0, rest) = b.split_at(1);
-    let (at, b0t) = transform_seq(a, b0, a_first);
-    let (at2, rest_t) = transform_seq(&at, rest, a_first);
+    let (at, b0t) = transform_seq_rec(a, b0, a_first);
+    let (at2, rest_t) = transform_seq_rec(&at, rest, a_first);
     let mut bout = b0t;
     bout.extend(rest_t);
     (at2, bout)

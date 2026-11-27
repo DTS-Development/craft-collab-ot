@@ -164,7 +164,7 @@ mod tests {
         }
         fn random_op(&self, rng: &mut Rng) -> Option<Self::Op> {
             // id는 클라이언트마다 겹치지 않게 난수 큰 값(실제는 id 임대)
-            let fresh = 1_000_000 + rng.next() % 1_000_000_000;
+            let fresh = 1_000_000 + rng.next_u64() % 1_000_000_000;
             Some(match rng.below(4) {
                 0 => CmdOp::new("ins_row", json!({"i": rng.below(self.rows.len() + 1), "id": fresh})),
                 1 if !self.rows.is_empty() => {

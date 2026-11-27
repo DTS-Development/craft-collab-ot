@@ -31,6 +31,9 @@ impl Transform for RegOp {
         }
         vec![self.clone()]
     }
+    fn independent(&self, other: &Self) -> bool {
+        self.key != other.key
+    }
 }
 
 /// 키-값 문서.

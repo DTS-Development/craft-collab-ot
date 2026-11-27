@@ -78,7 +78,7 @@ impl SimDoc for SeqDoc {
         seq_doc(3)
     }
     fn random_op(&self, rng: &mut Rng) -> Option<SeqOp> {
-        let fresh = 1_000 + rng.next() % 1_000_000_000_000;
+        let fresh = 1_000 + rng.next_u64() % 1_000_000_000_000;
         let n = self.0.len();
         Some(match rng.below(3) {
             0 => SeqOp::Ins { i: rng.below(n + 1), id: fresh, v: json!(fresh) },
@@ -188,4 +188,57 @@ fn seq_batches_converge() {
         let p2 = apply_all(&apply_all(&s, &b).unwrap(), &a2).unwrap();
         assert_eq!(p1.canon(), p2.canon(), "iter {it}\n s={}\n a={a:?}\n b={b:?}", s.canon());
     }
+}
+
+/// 반복문 `transform_seq`는 옛 재귀와 같은 결과를 낸다(쪼개짐·사라짐이 있는 seq 묶음과 reg 묶음).
+#[test]
+fn transform_seq_loop_equals_the_old_recursion() {
+    use crate::core::{transform_seq, transform_seq_rec};
+    let mut rng = Rng::new(21);
+    for it in 0..4000 {
+        let s = seq_doc(rng.below(6));
+        let mk = |rng: &mut Rng| {
+            let mut d = s.clone();
+            let mut v = vec![];
+            for _ in 0..1 + rng.below(6) {
+                if let Some(o) = d.random_op(rng) {
+                    d.apply(&o).unwrap();
+                    v.push(o);
+                }
+            }
+            v
+        };
+        let (a, b) = (mk(&mut rng), mk(&mut rng));
+        for first in [true, false] {
+            assert_eq!(transform_seq(&a, &b, first), transform_seq_rec(&a, &b, first), "iter {it} seq\n a={a:?}\n b={b:?}");
+        }
+        let regs = |rng: &mut Rng| -> Vec<RegOp> {
+            (0..1 + rng.below(8)).map(|_| RegOp { key: format!("k{}", rng.below(4)), value: rng.chance(1, 2).then(|| json!(rng.below(9))) }).collect()
+        };
+        let (ra, rb) = (regs(&mut rng), regs(&mut rng));
+        for first in [true, false] {
+            assert_eq!(transform_seq(&ra, &rb, first), transform_seq_rec(&ra, &rb, first), "iter {it} reg");
+        }
+    }
+}
+
+/// 큰 묶음에서 스택이 넘치지 않는다(원격 묶음 하나로 편집기가 죽던 문제). 스레드 스택을 1MiB로 줄여 wasm과 맞춘다.
+#[test]
+fn transform_seq_does_not_overflow_the_stack_on_big_bundles() {
+    use crate::core::transform_seq;
+    let go = || {
+        let reg = |n: usize, p: &str| -> Vec<RegOp> { (0..n).map(|i| RegOp { key: format!("{p}{}", i % 50), value: Some(json!(i)) }).collect() };
+        for (n, m) in [(10_000, 1), (1, 10_000), (2_000, 2_000), (5_000, 1)] {
+            let (a, b) = (reg(n, "k"), reg(m, "k"));
+            let t = std::time::Instant::now();
+            let (a2, b2) = transform_seq(&a, &b, true);
+            eprintln!("transform_seq {n}x{m}: {:?}", t.elapsed());
+            assert!(a2.len() <= n && b2.len() <= m);
+        }
+        // 키가 겹치지 않으면 변환 없이 지나가 빠르다.
+        let (a, b) = (reg(2_000, "a"), reg(2_000, "b"));
+        let (a2, b2) = transform_seq(&a, &b, true);
+        assert_eq!((a2.len(), b2.len()), (2_000, 2_000));
+    };
+    std::thread::Builder::new().stack_size(1 << 20).spawn(go).unwrap().join().unwrap();
 }
